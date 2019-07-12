@@ -1,0 +1,1297 @@
+// ---------------------------------------------------------------------------
+
+#include <vcl.h>
+#pragma hdrstop
+
+#include "Unit1.h"
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <stdio.h>
+using namespace std;
+bool entrada = true;
+int cantidad = 0;
+int p_actual[6];
+int memoria = 1;
+int cpu = 1;
+int t_actual;
+int nuevo_proceso;
+int proceso_desplegado;
+
+vector<int>ready;             //PROCESO EN READY - DINAMICO
+vector<int>blocked;           //PROCESO EN BLOCKED
+vector<int>running;           //PROCESO EJECUTANDOSE
+vector<int>llegada;           //A QUE HORA LLEGÓ
+vector<int>envejecimiento;    //TIEMPO QUE PASA EN READY = TIEMPO DE ESPERA
+vector<int>cpu_asignado;     //CPU ASIGNADO
+vector<int>cpu_restante;     //CPU RESTANTE
+vector<int>finished;		 //VECTOR PARA LOS PROCESOS TERMINADOS
+vector<int>quantum_restante; //PARA ROUND ROBIN
+vector<int>tiempo_total;     //TIEMPO ESTIMADO DE SERVICIO
+
+vector<int>tiempo_blocked;	 //TIEMPO DE LOS PROCESOS EN BLOCKED
+
+vector<int>fila;
+vector<vector<int> > pagina;
+vector<vector<vector<int> > > proceso;
+int max_pa;
+
+//UN METODO QUE TENGA UN CONTADOR Y QUE CADA QUE SE CLICA A UN BOTON
+//SE MANDE LLAMAR PARA CONTAR DE UNO EN UNO EL TIEMPO EN BLOCKED
+//CADA QUE LLEGUE A CINCO, QUE ESE PROCESO PASE DE BLOCKED A READY
+//SI LA INTERRUPCIÓN DE DISPOSITIVO DE I/O SE EJECUTA QUE EL CONTADOR
+//LLEGUE A CERO
+
+// ---------------------------------------------------------------------------
+#pragma package(smart_init)
+#pragma resource "*.dfm"
+TForm1 *Form1;
+
+// ---------------------------------------------------------------------------
+__fastcall TForm1::TForm1(TComponent* Owner) : TForm(Owner) {
+}
+// ---------------------------------------------------------------------------
+
+
+void muestraDespliegue(){
+	int select = proceso_desplegado;
+	Form1->Nombre->Caption = proceso_desplegado+1;
+	Form1->Llegada->Caption = llegada[select];
+	Form1->Envejecimiento->Caption = envejecimiento[select];
+	Form1->Cpu_restante->Caption = cpu_restante[select];
+	Form1->Quantum_restante->Caption = quantum_restante[select];
+}
+
+/*
+void last(){
+
+	if(){
+	}
+
+}
+*/
+
+void sacarBloqueado(){
+	ready.push_back(blocked[0]);
+
+	for (int x = 0; x < blocked.size() - 1; x++) {
+				blocked[x] = blocked[x + 1];
+			}
+
+	blocked.pop_back();
+}
+
+void fueraBlocked(){
+
+if(!blocked.empty()){
+	for(int x=0;x<blocked.size();x++){
+		tiempo_blocked[blocked[x]-1]++;
+	}
+
+	if((tiempo_blocked[blocked[0]-1]) >= 5){
+			sacarBloqueado();
+	}
+	}
+}
+
+void desplegar_tabla(){
+TListItem *ListIt;
+	Form1->ListView1->Clear();
+// CICLO PARA LAS PAGINAS DE CADA PROCESO
+	for (int z = 0; z < proceso.size(); z++) {
+		if (Form1->Nombre->Caption.ToInt() == (z + 1)) {
+			Form1->Pagina->Items->Clear();
+			for (int x = 0; x < proceso.at(z).size(); x++) {
+				Form1->Pagina->Items->Add(x);
+				ListIt = Form1->ListView1->Items->Add();
+				ListIt->Caption = x;
+					for (int y = 0; y < 6; y++) {
+						ListIt->SubItems->Add(proceso[z][x][y]);
+					}
+			}
+		}
+	}
+	// CICLO PARA LAS PAGINAS DE CADA PROCESO
+}
+
+  /*
+void next(){
+if(running.empty()){
+}
+}
+*/
+
+// Este va sumando uno por uno el envejecimiento de los procesos que estén en Ready.
+void sumaEnvejecimiento() {
+	for (int x = 0; x < ready.size(); x++) {
+		envejecimiento[ready[x] - 1]++;
+	}
+}
+
+
+void calculo_CPURestante(){
+for(int x = 0;x < proceso.size(); x++){
+	cpu_restante[x] = tiempo_total[x] - cpu_asignado[x];
+}
+}
+
+void desplegarRunning() {
+	TListItem *ListIt;
+
+	Form1->ListView1->Clear();
+
+	if (!running.empty()) {
+		// VARIABLES LOCALES
+		int select = (running[0]) - 1;
+		// VARIABLES LOCALES
+		calculo_CPURestante();
+		Form1->Nombre->Caption = running[0];
+		Form1->Llegada->Caption = llegada[select];
+		Form1->Envejecimiento->Caption = envejecimiento[select];
+		Form1->Cpu_restante->Caption = cpu_restante[select];
+		Form1->Quantum_restante->Caption = quantum_restante[select];
+
+	}
+
+	//EN ESTE CICLO SE DESPLIEGAN LAS FILAS Y COLUMNAS.
+	for(int x=0; x<proceso.size() ;x++){ //PRIMER NIVEL-EL PROCESO
+	if(running[0]==(x+1)){
+		for(int y=0; y<proceso.at(x).size();y++){//SEGUNDO NIVEL-EL ARREGLO BIDIMENSIONAL
+			ListIt = Form1->ListView1->Items->Add();
+			ListIt->Caption = y;
+			for (int z = 0; z < 6; z++) {
+					ListIt->SubItems->Add(proceso[x][y][z]);
+				}
+		}
+	}
+	}
+
+
+}
+
+void imprimirEstados() {
+
+	Form1->ListViewRunning->Items->Clear();
+	Form1->ListViewBlocked->Items->Clear();
+	Form1->ListViewReady->Items->Clear();
+	//***********************************************************************************************************************************************************************************************************************************************************************************************************************
+
+	//COMBOBOX-PROCESO A DESPLEGAR***************************************
+    Form1->Procesos->Clear();
+	for(int x = 1; x <=proceso.size(); x++){
+		//for(int y = 0; y < finished.size(); y++){
+			//if(finished[y] != x){
+				Form1->Procesos->Items->Add(x);
+			//}
+		//}
+	}
+	//COMBOBOX-PROCESO A DESPLEGAR***************************************
+
+	TListItem *ListIt;
+	if (!running.empty()) {
+		for (int x = 0; x < running.size(); x++) {
+			ListIt = Form1->ListViewRunning->Items->Add();
+			ListIt->Caption = running[x];
+		}
+	}
+	if (!blocked.empty()) {
+		for (int y = 0; y < blocked.size(); y++) {
+			ListIt = Form1->ListViewBlocked->Items->Add();
+			ListIt->Caption = blocked[y];
+		}
+	}
+
+	if (!ready.empty()) {
+		for (int w = 0; w < ready.size(); w++) {
+			ListIt = Form1->ListViewReady->Items->Add();
+			ListIt->Caption = ready[w];
+		}
+	}
+}
+
+void llenarInicial() {
+	ifstream archivo("input.txt");
+	// ----------------VARIABLES--GLOBALES------------------------
+	max_pa; // NÚMERO MÁXIMO DE PÁGINAS EJECUTÁNDOSE POR PROCESO.
+	t_actual; // TIEMPO ACTUAL DEL RELOJ.
+	// ----------------VARIABLES--GLOBALES------------------------
+
+	// ----------------VARIABLES--LOCALES------------------------
+	int pags = 0; // CANTIDAD DE PÁGINAS POR PROCESOS.
+	int proc = 0; // NÚMERO DE PROCESOS.
+	int dato = 0; // SE USA PARA ALMACENAR LOS NÚEROS Y SE DECIDE SI SE USAN O NO.
+	int llegada_local = 0; // SE USA PARA RECIBIR EL DATO DE LLEGADA
+	int tTotal = 0; // SE USA PARA RECIBIR EL DATO DEL TIEMPO TOTAL
+	int estado = 0; // SE USA PARA RECIBIR EL DATO DEL ESTADO EN QUE SE ENCUENTRA DENTRO DEL ARCHIVO
+	String c; // ESTA VARIABLE SERÁ LA QUE SE EVALÚE SI ES COMA O NO.
+	// ----------------VARIABLES--LOCALES------------------------
+
+	if (!archivo.is_open()) {
+		ShowMessage("ERROR DE LECTURA");
+	}
+
+	archivo >> max_pa;
+	c = archivo.get();
+	if (c != ",") {
+		archivo >> t_actual;
+	}
+	archivo >> proc;
+
+	nuevo_proceso = proc + 1;
+
+	// CICLO PARA DAR VUELTAS A CADA DATO DE LOS PROCESOS
+	for (int p = 1; p <= proc; p++) {
+
+		// LLENADO DE VECTORES CON VALORES ESTATICOS
+		envejecimiento.push_back(0);
+		cpu_asignado.push_back(0);
+		cpu_restante.push_back(0);
+		quantum_restante.push_back(5);
+		tiempo_blocked.push_back(0);
+		// LLENADO DE VECTORES CON VALORES ESTATICOS
+
+		// CICLO PARA AGARRAR LOS TRES DATOS DE CPU DE CADA PROCESO
+		// llegada, tiempo total estimado, y estado (1-running, 2-blocked, 3-ready)
+		for (int d = 0; d < 3; d++) {
+			c = archivo.get();
+			if (c != ",") {
+				archivo >> dato;
+				if (d == 0) {
+					llegada_local = dato;
+					llegada.push_back(llegada_local);
+				}
+				if (d == 1) {
+					tTotal = dato;
+					tiempo_total.push_back(tTotal);
+				}
+				if (d == 2) {
+					estado = dato;
+					if (estado == 1) {
+						running.push_back(p);
+					}
+					if (estado == 2) {
+						blocked.push_back(p);
+					}
+					if (estado == 3) {
+						ready.push_back(p);
+					}
+				}
+			}
+		}
+
+		archivo >> pags;
+
+		//
+		// CICLO DE LLENADO DE VECTORES UNI, BI Y TRIDIMENSIONAL
+		//
+		for (int pag = 0; pag < pags; pag++) {
+			for (int num = 0; num < 6; num++) {
+				c = archivo.get();
+				if (c != ",") {
+					archivo >> dato;
+					fila.push_back(dato);
+					if (num == 6) {
+						fila.push_back(0);
+					}
+				}
+			}
+			pagina.push_back(fila);
+			fila.clear();
+		}
+		proceso.push_back(pagina);
+		pagina.clear();
+	}
+	archivo.close();
+}
+
+// ---------------------------------------------------------------------------
+void readyArunning() {    //APARENTEMENTE ESTE ES FIFO
+	if (running.empty()) {
+		running.push_back(ready[0]);
+		for (int x = 0; x < ready.size() - 1; x++) {
+			ready[x] = ready[x + 1];
+		}
+		ready.pop_back();
+	}
+}
+
+//MÉTODO QUE IRÁ RESTANTO EL QUANTUM DE CADA PROCESO QUE SE ENCUENTRE EN EJECUCIÓN
+void resta_quantum(){
+	if(running.empty()){
+		  readyArunning();
+	}
+	else{
+
+	quantum_restante[running[0]-1]--;
+	muestraDespliegue();
+	if(quantum_restante[running[0]-1] <= 0){
+		int quantum = Form1->AsignacionQuantum->Text.ToInt();
+		quantum_restante[running[0]-1] = quantum;
+		ready.push_back(running[0]);
+		running.pop_back();
+		readyArunning();
+		imprimirEstados();
+	}
+
+	}
+
+
+}
+
+
+void readyArunningPrioridad(int proceso){
+if(!running.empty()){
+	ready.push_back(running[0]);
+	running.pop_back();
+}
+	running.push_back(proceso);
+	imprimirEstados();
+}
+
+void hrrn_cpu(){
+if(cpu_restante[running[0]-1] <= 0){
+	finished.push_back(running[0]);
+	running.pop_back();
+}
+double prioridad = 0;
+double mayorP = 0;
+int proceso = 0;
+int posicion = 0;
+double tes = 0;
+double env = 0;
+	if(running.empty()){
+	for(int x = 0; x<ready.size();x++){
+	tes =  tiempo_total[ready[x]-1];
+	env = envejecimiento[ready[x]-1];
+	prioridad = ((double)tes+(double)env)/(double)tes;
+			if(prioridad > mayorP){
+			mayorP = prioridad;
+			proceso = ready[x];
+			}
+	}
+
+	for(int y = 0;y<ready.size();y++){
+	if(ready[y]==proceso){
+		posicion = y;
+	}
+	}
+
+	readyArunningPrioridad(proceso);
+
+	ready.erase(ready.begin()+posicion);
+	}
+
+}
+
+void sjf_cpu(){
+int proceso = 0;
+int posicion = 0;
+if(cpu_restante[running[0]-1] <= 0){
+	finished.push_back(running[0]);
+	running.pop_back();
+}
+
+	int menor = 999;
+		for (int x = 0; x < ready.size(); x++) {
+			if (cpu_asignado[ready[x] - 1] < menor) {
+				menor = cpu_asignado[ready[x] - 1];
+			}
+		}
+
+		for (int y = 0; y < ready.size(); y++) {
+		if ((cpu_asignado[ready[y] - 1]) == menor){
+			proceso = ready[y];
+			posicion = y;
+			break;						
+		}	
+		}
+
+		readyArunningPrioridad(proceso);
+
+		ready.erase(ready.begin()+posicion);
+
+//SE TOMA EL CPU ASIGNADO MENOR
+//Y SE PASA A RUNNING
+//ESTE ES DIFERENTE A SRT, YA QUE ESTE NO INTERRUMPE EL PROCESO
+}
+
+void srt_cpu(){
+
+int posicion = 0; //cual es el proceso con menor cpu_restante
+
+	if(cpu_restante[running[0]-1] <= 0){//si el cpu_restante es cero se elimina
+	finished.push_back(running[0]);
+	running.pop_back();
+	}
+
+	int menor = 999;
+		for (int x = 0; x < ready.size(); x++) { //saca al proceso con menor cpu_restante
+			if (cpu_restante[ready[x] - 1] < menor) {
+				menor = cpu_restante[ready[x] - 1];
+				posicion=x;
+			}
+		}
+
+	if(cpu_restante[running[0]-1] > cpu_restante[ready[posicion]-1]){
+		blocked.push_back(running[0]);
+		running.pop_back();
+		running.push_back(ready[posicion]);
+		ready.erase(ready.begin()+posicion);
+	}
+	imprimirEstados();
+}
+
+void round_robin_cpu(){
+if(cpu_restante[running[0]-1] <= 0){
+	finished.push_back(running[0]);
+	running.pop_back();
+}
+	resta_quantum();
+}
+
+void fifo_cpu(){
+if(!ready.empty()){
+if(cpu_restante[running[0]-1] <= 0){
+	finished.push_back(running[0]);
+	running.pop_back();
+}
+	readyArunning();
+}
+}
+
+void dispatcher(){ //ALGORITMOS DE CPU
+switch(cpu) {
+	case 1: //FIFO
+		fifo_cpu();
+		break;
+	case 2: //ROUND ROBIN
+		round_robin_cpu();
+		break;
+	case 3: //SRT
+		srt_cpu();
+		break;
+	case 4: //SJF
+	if(running.empty()){
+		sjf_cpu();
+		}
+		break;
+	case 5: //HRRN
+		hrrn_cpu();
+		break;
+	}
+	/*
+	cantidad++;
+	if((cantidad % 5)==0){
+		sacarBloqueado();
+	}
+	*/
+
+}
+
+void __fastcall TForm1::CambiarClick(TObject *Sender) {
+	memoria++;
+	switch(memoria) {
+	case 1:
+		t_algoritmo->Caption = "FIFO";
+		break;
+
+	case 2:
+		t_algoritmo->Caption = "LRU";
+		break;
+
+	case 3:
+		t_algoritmo->Caption = "LFU";
+		break;
+
+	case 4:
+		t_algoritmo->Caption = "NUR";
+		break;
+
+	case 5:
+		t_algoritmo->Caption = "FIFO";
+		memoria = 1;
+		break;
+	}
+
+	fueraBlocked();
+
+	t_actual++;
+
+	cpu_asignado[running[0]-1]++;
+
+	calculo_CPURestante();
+	sumaEnvejecimiento();
+	muestraDespliegue();
+	dispatcher();
+	imprimirEstados();
+
+	tiempo_Actual->Caption = t_actual;
+
+}
+// ---------------------------------------------------------------------------
+
+void __fastcall TForm1::CambiarAClick(TObject *Sender) {
+	cpu++;
+	switch(cpu) {
+	case 1:
+		cpu_algoritmo->Caption = "FIFO";
+		break;
+
+	case 2:
+		cpu_algoritmo->Caption = "Round Robin";
+		break;
+
+	case 3:
+		cpu_algoritmo->Caption = "SRT";
+		break;
+
+	case 4:
+		cpu_algoritmo->Caption = "SJF";
+		break;
+
+	case 5:
+		cpu_algoritmo->Caption = "HRRN";
+		break;
+	case 6:
+		cpu_algoritmo->Caption = "FIFO";
+		cpu = 1;
+		break;
+	}
+
+	sumaEnvejecimiento();
+	muestraDespliegue();
+	cpu_asignado[running[0]-1]++;
+
+	calculo_CPURestante();
+
+	t_actual++;
+	dispatcher();
+	imprimirEstados();
+
+	tiempo_Actual->Caption = t_actual;
+}
+// ---------------------------------------------------------------------------
+
+/*
+VIEJO DESPLEGAR RUNNING
+VIEJO DESPLEGAR RUNNING
+VIEJO DESPLEGAR RUNNING
+void desplegarRunning(){
+Form1->ListView1->Items->Clear();
+TListItem *ListIt;
+
+for (int z = 0; z < proceso.size(); z++) {
+for (int x = 0; x < proceso.at(z).size(); x++) {
+ListIt = Form1->ListView1->Items->Add();
+ListIt->Caption = x;
+for (int y = 0; y < 6; y++) {
+ListIt->SubItems->Add(proceso[z][x][y]);
+}
+}
+}
+}
+VIEJO DESPLEGAR RUNNING
+VIEJO DESPLEGAR RUNNING
+VIEJO DESPLEGAR RUNNING
+ */
+
+
+
+// ---------------------------------------------------------------------------
+
+void __fastcall TForm1::FormCreate(TObject *Sender) {
+	/////////////////////////*Tamaño de quantum*/////////////////////////
+	UpDown1->Min = 5;
+	UpDown1->Max = 255;
+	UpDown1->Associate = AsignacionQuantum;
+
+	/////////////////////////*Páginas*///////////////////////////////////
+	UpDown2->Min = 1;
+	UpDown2->Max = 255;
+	UpDown2->Associate = Paginas;
+
+	/////////////////////////*Ejecución Total*///////////////////////////
+	UpDown3->Min = 1;
+	UpDown3->Max = 255;
+	UpDown3->Associate = EjecucionTotal;
+
+	llenarInicial();
+	desplegarRunning();
+
+	// LLENADO DEL COMBOBOX DE LOS PROCESOS
+	for (int x = 1; x <= proceso.size(); x++) {
+		Procesos->Items->Add(x);
+	}
+
+	// LLENADO DEL COMBOBOX DE INTERRUPCIONES
+	Interrupciones->Items->Add("SVC Terminación normal y anormal");
+	Interrupciones->Items->Add("SVC Solicitud I/O");
+	Interrupciones->Items->Add("Externa Quantum Expirado");
+	Interrupciones->Items->Add("Dispositivo de I/O");
+	Interrupciones->Items->Add("FUERA BLOQUEADO");
+
+	nuevoProcesoNombre->Caption = nuevo_proceso;
+	tiempo_Actual->Caption = t_actual;
+	ListView1->ViewStyle = vsReport;
+	ListViewRunning->ViewStyle = vsReport;
+	ListViewBlocked->ViewStyle = vsReport;
+	ListViewReady->ViewStyle = vsReport;
+
+	imprimirEstados();
+
+	/*
+	//POR CUIESTIA DE PDUFIA
+	Label15->Caption = proceso[0][0][0];
+	Label16->Caption = proceso[0][0][0];
+	Label17->Caption = proceso[0][0][0];
+	Label18->Caption = proceso[0][0][0];
+	Label19->Caption = proceso[0][0][0];
+	 */
+}
+
+void __fastcall TForm1::DesplegarClick(TObject *Sender) {
+	t_actual++;
+
+	// VARIABLES LOCALES
+	int select = (Procesos->Text.ToInt()) - 1;
+	proceso_desplegado = select;
+	// VARIABLES LOCALES
+
+	//AUMENTA EL CPU ASIGNADO PARA EL PROCESO EN RUNNING
+	cpu_asignado[running[0]-1]++;
+
+	calculo_CPURestante();
+
+	Nombre->Caption = Procesos->Text.ToInt();
+	Llegada->Caption = llegada[select];
+	Envejecimiento->Caption = envejecimiento[select];
+	Cpu_restante->Caption = cpu_restante[select];
+	Quantum_restante->Caption = quantum_restante[select];
+
+	fueraBlocked();
+
+	desplegar_tabla();
+
+	dispatcher();
+	sumaEnvejecimiento();
+	imprimirEstados();
+	tiempo_Actual->Caption = t_actual;
+}
+
+void __fastcall TForm1::InterrumpirClick(TObject *Sender) {
+	t_actual++;
+
+	if (Interrupciones->Text == "SVC Terminación normal y anormal") {
+		// El proceso se elimina de running, no regresa a ready.
+		finished.push_back(running[0]);
+		running.pop_back();
+		running.pop_back();
+		// sincronizar();
+		// if(!running.empty()) {
+		dispatcher(); // }
+		imprimirEstados();
+	}
+	if (Interrupciones->Text == "SVC Solicitud I/O") {
+		// READY A BLOCKED
+		if(!running.empty()){
+		blocked.push_back(running[0]);
+		for (int x = 0; x < running.size() - 1; x++) {
+			running[x] = running[x + 1];
+		}
+		running.pop_back();
+		dispatcher();
+		imprimirEstados();
+		}
+	}
+	if (Interrupciones->Text == "Externa Quantum Expirado") {
+		// El proceso en running regresa a ready.
+		int quantum = Form1->AsignacionQuantum->Text.ToInt();
+		quantum_restante[running[0]-1] = quantum;
+		ready.push_back(running[0]);
+		running.pop_back();
+		dispatcher();
+		imprimirEstados();
+	}
+	if (Interrupciones->Text == "Dispositivo de I/O") {
+		// El primer proceso bloqueado regresa a ready
+		if (!blocked.empty()) {
+		int quantum = Form1->AsignacionQuantum->Text.ToInt();
+		quantum_restante[running[0]-1] = quantum;
+			ready.push_back(blocked[0]);
+			for (int x = 0; x < blocked.size() - 1; x++) {
+				blocked[x] = blocked[x + 1];
+			}
+			blocked.pop_back();
+		}
+		else {
+			ShowMessage("No hay procesos en Blocked");
+			// ShowMessage(max);
+			return;
+		}
+		imprimirEstados();
+		// ShowMessage("No hay Procesos en Blocked");
+
+	}
+	if (Interrupciones->Text == "FUERA BLOQUEADO") {
+
+            sacarBloqueado();
+	}
+
+	cpu_asignado[running[0]-1]++;
+	calculo_CPURestante();
+	sumaEnvejecimiento();
+	muestraDespliegue();
+	imprimirEstados();
+	tiempo_Actual->Caption = t_actual;
+}
+// ---------------------------------------------------------------------------
+
+void __fastcall TForm1::ReseteoClick(TObject *Sender) {
+	t_actual++;
+
+	for (int x = 0; x < proceso.size(); x++) {
+	if (running[0] == (x + 1)){
+		for (int y = 0; y < proceso.at(x).size(); y++) {
+			proceso[x][y][4] = 0;
+			proceso[x][y][5] = 0;
+		}
+		}
+	}
+
+	desplegar_tabla();
+	
+	sumaEnvejecimiento();
+	cpu_asignado[running[0]-1]++;
+	calculo_CPURestante();
+	muestraDespliegue();
+	dispatcher();
+	tiempo_Actual->Caption = t_actual;
+	imprimirEstados();
+}
+// ---------------------------------------------------------------------------
+
+void __fastcall TForm1::CrearClick(TObject *Sender) {
+	int total_paginas = Paginas->Text.ToInt();
+	int tiempo_ejecucion = EjecucionTotal->Text.ToInt();
+	int tiempo_llegada = tiempo_Actual->Caption.ToInt();
+	int quantum = AsignacionQuantum->Text.ToInt();
+	nuevo_proceso;
+	for (int x = 0; x < total_paginas; x++) {
+		for (int y = 0; y < 6; y++) {
+			fila.push_back(0);
+			if (y == 6) {
+				fila.push_back(0);
+			}
+		}
+		pagina.push_back(fila);
+		fila.clear();
+	}
+	proceso.push_back(pagina);
+	pagina.clear();
+
+	//SE DESPLIEGAN TODOS LOS PROCESOS QUE NO HAYAN SIDO TERMINADOS
+	//CON EL NUEVO PROCESO CREADO
+	//
+	Procesos->Clear();
+	for (int x = 1; x <= proceso.size(); x++) {
+		Procesos->Items->Add(x);
+	}
+	//
+	//SE DESPLIEGAN TODOS LOS PROCESOS QUE NO HAYAN SIDO TERMINADOS
+	//CON EL NUEVO PROCESO CREADO
+
+	quantum_restante[running[0]-1] = quantum;
+	ready.push_back(nuevo_proceso);
+
+	llegada.push_back(tiempo_llegada);
+
+	tiempo_blocked.push_back(0);
+
+	envejecimiento.push_back(0);
+
+	cpu_asignado.push_back(0);
+
+	cpu_restante.push_back(0);
+
+	quantum_restante.push_back(quantum);
+
+	tiempo_total.push_back(tiempo_ejecucion);
+
+	t_actual++;
+
+	cpu_asignado[running[0]-1]++;
+
+	calculo_CPURestante();
+
+	imprimirEstados();
+	sumaEnvejecimiento();
+	muestraDespliegue();
+	dispatcher();
+	nuevo_proceso++;
+	nuevoProcesoNombre->Caption = nuevo_proceso;
+	tiempo_Actual->Caption = t_actual;
+}
+// ---------------------------------------------------------------------------
+
+//ALGORITMO MEMORIA FIFO
+void memoria_fifo(int process, int pagina){
+	int mayor = 0;
+
+	int menor = 999;
+
+	int count = 0;
+
+	int residencia = 0;
+
+	int llegada = 0;
+
+	for (int a = 0; a < proceso.at(process).size(); a++) {
+			if (proceso[process][a][0] == 1) {
+			count++;
+			if (proceso[process][a][1] < menor) {
+				menor = proceso[process][a][1];
+			}
+			if(proceso[process][a][1] > mayor){
+				mayor = proceso[process][a][1];
+			}
+		}
+	}
+
+	if(count < max_pa){
+	residencia = proceso[process][pagina][0];
+		if(residencia == 0){
+			proceso[process][pagina][0] = 1;
+			proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+			//RUNNING A BLOCKED
+		}
+		else if(residencia == 1){
+		//proceso[process][pagina][1] = mayor +1;
+		proceso[process][pagina][2] = t_actual;
+		proceso[process][pagina][3]++;
+		proceso[process][pagina][4] = 1;
+		proceso[process][pagina][6]++;
+		if (proceso[process][pagina][6] >= 5) {
+			proceso[process][pagina][5] = 1;
+			proceso[process][pagina][6] = 0;
+		}
+		}
+	}
+	else if(count >= max_pa){
+	residencia = proceso[process][pagina][0];
+	if(residencia == 0){
+	if(!running.empty()){
+		blocked.push_back(running[0]);
+		for (int x = 0; x < running.size() - 1; x++) {
+			running[x] = running[x + 1];
+		}
+		running.pop_back();
+		dispatcher();
+		imprimirEstados();
+		}
+	for (int b = 0; b < proceso.at(process).size(); b++) {
+		if(proceso[process][b][0] == 1){
+		if(proceso[process][b][1] == menor){
+			proceso[process][b][0] = 0;
+			break;
+		}
+		}
+	}
+
+	proceso[process][pagina][0] = 1;
+	proceso[process][pagina][1] = mayor +1;
+	proceso[process][pagina][2] = t_actual;
+	proceso[process][pagina][3]++;
+	proceso[process][pagina][4] = 1;
+	proceso[process][pagina][6]++;
+	}
+	else if(residencia == 1){
+	//proceso[process][pagina][1] = mayor +1;
+	proceso[process][pagina][2] = t_actual;
+	proceso[process][pagina][3]++;
+	proceso[process][pagina][4] = 1;
+	proceso[process][pagina][6]++;
+	if (proceso[process][pagina][6] >= 5) {
+			proceso[process][pagina][5] = 1;
+			proceso[process][pagina][6] = 0;
+		}
+	}
+	//EL QUE TENGA MENOR TIEMPO DE LLEGADA, APAGO SU BIT DE RESIDENCIA Y
+	//ENCIENDO EL DE LA PAGINA A EJECUTAR
+	//RUNNING A BLOCKED;
+	}
+
+	desplegarRunning();
+
+}
+//ALGORITMO MEMORIA FIFO
+
+//ALGORITMO MEMORIA LRU
+void memoria_lru(int process, int pagina){
+
+	int mayor = 0;
+
+	int menor = 999;
+
+	int count = 0;
+
+	int residencia = 0;
+
+	int llegada = 0;
+
+	for (int a = 0; a < proceso.at(process).size(); a++) {
+			if (proceso[process][a][0] == 1) {
+			count++;
+			if (proceso[process][a][2] < menor) {
+				menor = proceso[process][a][2];
+			}
+			if(proceso[process][a][1] > mayor){
+				mayor = proceso[process][a][1];
+			}
+		}
+	}
+
+	if(count < max_pa){
+	residencia = proceso[process][pagina][0];
+		if(residencia == 0){
+			proceso[process][pagina][0] = 1;
+			proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+			//RUNNING A BLOCKED
+		}
+		else if(residencia == 1){
+		//proceso[process][pagina][1] = mayor +1;
+		proceso[process][pagina][2] = t_actual;
+		proceso[process][pagina][3]++;
+		proceso[process][pagina][4] = 1;
+		proceso[process][pagina][6]++;
+		if (proceso[process][pagina][6] >= 5) {
+			proceso[process][pagina][5] = 1;
+			proceso[process][pagina][6] = 0;
+		}
+		}
+	}
+	else if(count >= max_pa){
+	residencia = proceso[process][pagina][0];
+	if(residencia == 0){
+	if(!running.empty()){
+		blocked.push_back(running[0]);
+		for (int x = 0; x < running.size() - 1; x++) {
+			running[x] = running[x + 1];
+		}
+		running.pop_back();
+		dispatcher();
+		imprimirEstados();
+		}
+	for (int b = 0; b < proceso.at(process).size(); b++) {
+	if(proceso[process][b][0] == 1){
+		if(proceso[process][b][2] == menor){
+			proceso[process][b][0] = 0;
+			break;
+		}
+		}
+	}
+
+	proceso[process][pagina][0] = 1;
+	proceso[process][pagina][1] = mayor +1;
+	proceso[process][pagina][2] = t_actual;
+	proceso[process][pagina][3]++;
+	proceso[process][pagina][4] = 1;
+	proceso[process][pagina][6]++;
+	}
+	else if(residencia == 1){
+	//proceso[process][pagina][1] = mayor +1;
+	proceso[process][pagina][2] = t_actual;
+	proceso[process][pagina][3]++;
+	proceso[process][pagina][4] = 1;
+	proceso[process][pagina][6]++;
+	if (proceso[process][pagina][6] >= 5) {
+			proceso[process][pagina][5] = 1;
+			proceso[process][pagina][6] = 0;
+		}
+	}
+	//EL QUE TENGA MENOR TIEMPO DE LLEGADA, APAGO SU BIT DE RESIDENCIA Y
+	//ENCIENDO EL DE LA PAGINA A EJECUTAR
+	//RUNNING A BLOCKED;
+	}
+
+	desplegarRunning();
+
+}
+//ALGORITMO MEMORIA LRU
+
+//ALGORITMO MEMORIA LFU
+void memoria_lfu(int process, int pagina){
+
+	int mayor = 0;
+
+	int menor = 999;
+
+	int count = 0;
+
+	int residencia = 0;
+
+	for (int a = 0; a < proceso.at(process).size(); a++) {
+			if (proceso[process][a][0] == 1) {
+			count++;
+			if (proceso[process][a][3] < menor) {
+				menor = proceso[process][a][3];
+			}
+			if(proceso[process][a][1] > mayor){
+				mayor = proceso[process][a][1];
+			}
+		}
+	}
+
+	if(count < max_pa){
+	residencia = proceso[process][pagina][0];
+		if(residencia == 0){
+			proceso[process][pagina][0] = 1;
+			proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+			//RUNNING A BLOCKED
+		}
+		else if(residencia == 1){
+		//proceso[process][pagina][1] = mayor +1;
+		proceso[process][pagina][2] = t_actual;
+		proceso[process][pagina][3]++;
+		proceso[process][pagina][4] = 1;
+		proceso[process][pagina][6]++;
+		if (proceso[process][pagina][6] >= 5) {
+			proceso[process][pagina][5] = 1;
+			proceso[process][pagina][6] = 0;
+		}
+		}
+	}
+	else if(count >= max_pa){
+	residencia = proceso[process][pagina][0];
+	if(residencia == 0){
+	if(!running.empty()){
+		blocked.push_back(running[0]);
+		for (int x = 0; x < running.size() - 1; x++) {
+			running[x] = running[x + 1];
+		}
+		running.pop_back();
+		dispatcher();
+		imprimirEstados();
+		}
+	for (int b = 0; b < proceso.at(process).size(); b++) {
+	if(proceso[process][b][0] == 1){
+		if(proceso[process][b][3] == menor){
+			proceso[process][b][0] = 0;
+			break;
+		}
+		}
+	}
+
+	proceso[process][pagina][0] = 1;
+	proceso[process][pagina][1] = mayor +1;
+	proceso[process][pagina][2] = t_actual;
+	proceso[process][pagina][3]++;
+	proceso[process][pagina][4] = 1;
+	proceso[process][pagina][6]++;
+	}
+	else if(residencia == 1){
+	//proceso[process][pagina][1] = mayor +1;
+	proceso[process][pagina][2] = t_actual;
+	proceso[process][pagina][3]++;
+	proceso[process][pagina][4] = 1;
+	proceso[process][pagina][6]++;
+	if (proceso[process][pagina][6] >= 5) {
+			proceso[process][pagina][5] = 1;
+			proceso[process][pagina][6] = 0;
+		}
+	}
+	//EL QUE TENGA MENOR TIEMPO DE LLEGADA, APAGO SU BIT DE RESIDENCIA Y
+	//ENCIENDO EL DE LA PAGINA A EJECUTAR
+	//RUNNING A BLOCKED;
+	}
+
+	desplegarRunning();
+
+}
+//ALGORITMO MEMORIA LFU
+
+//ALGORITMO MEMORIA NUR
+void memoria_nur(int process, int pagina){
+
+	int mayor = 0;
+	int menor = 999;
+	int count=0;
+	int residencia = 0;
+	bool entrada=true;
+
+	for (int a = 0; a < proceso.at(process).size(); a++) {
+		if (proceso[process][a][0] == 1) {
+		count++;
+
+		if(proceso[process][a][1] > mayor){
+				mayor = proceso[process][a][1];
+			}
+		}
+	}
+
+	if(count < max_pa){
+		residencia = proceso[process][pagina][0];
+			if(residencia == 0){
+				proceso[process][pagina][0] = 1;
+				proceso[process][pagina][1] = mayor +1;
+				proceso[process][pagina][2] = t_actual;
+				proceso[process][pagina][3]++;
+				proceso[process][pagina][4] = 1;
+				proceso[process][pagina][6]++;
+				//RUNNING A BLOCKED
+			}
+			else if(residencia == 1){
+				//proceso[process][pagina][1] = mayor +1;
+				proceso[process][pagina][2] = t_actual;
+				proceso[process][pagina][3]++;
+				proceso[process][pagina][4] = 1;
+				proceso[process][pagina][6]++;
+				if (proceso[process][pagina][6] >= 5) {
+					proceso[process][pagina][5] = 1;
+					proceso[process][pagina][6] = 0;
+				}
+			}
+	}
+	else if(count >= max_pa){
+	residencia= proceso[process][pagina][0];
+	if (residencia==0) {
+	if(!running.empty()){
+		blocked.push_back(running[0]);
+		for (int x = 0; x < running.size() - 1; x++) {
+			running[x] = running[x + 1];
+		}
+		running.pop_back();
+		dispatcher();
+		imprimirEstados();
+		}
+	for(int p = 0; p < proceso.at(process).size(); p++){
+		if (proceso[process][p][0] == 1 && proceso[process][p][4] == 0 && proceso[process][p][5]==0) {
+			proceso[process][p][0] = 0;
+
+			proceso[process][pagina][0] = 1;
+			proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+			entrada=false;
+			break;
+		}
+	}
+
+	if(entrada){
+	for(int p = 0; p < proceso.at(process).size(); p++){
+		if(proceso[process][p][0] == 1 && proceso[process][p][4] == 1 && proceso[process][p][5]==0){
+			proceso[process][p][0] = 0;
+
+			proceso[process][pagina][0] = 1;
+			proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+			entrada=false;
+			break;
+		}
+	}
+	}
+
+	if(entrada){
+	for(int p = 0; p < proceso.at(process).size(); p++){
+		if(proceso[process][p][0] == 1 && proceso[process][p][4] == 0 && proceso[process][p][5]==1){
+			proceso[process][p][0] = 0;
+
+			proceso[process][pagina][0] = 1;
+			proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+			entrada=false;
+			break;
+		}
+	}
+	}
+
+	if(entrada){
+	for(int p = 0; p < proceso.at(process).size(); p++){
+		if(proceso[process][p][0] == 1 && proceso[process][p][4] == 1 && proceso[process][p][5]==1){
+			proceso[process][p][0] = 0;
+
+			proceso[process][pagina][0] = 1;
+			proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+			entrada=false;
+			break;
+			}
+	}
+	}
+   }else if(residencia == 1){
+    		proceso[process][pagina][0] = 1;
+			//proceso[process][pagina][1] = mayor +1;
+			proceso[process][pagina][2] = t_actual;
+			proceso[process][pagina][3]++;
+			proceso[process][pagina][4] = 1;
+			proceso[process][pagina][6]++;
+
+			if (proceso[process][pagina][6] >= 5) {
+					proceso[process][pagina][5] = 1;
+					proceso[process][pagina][6] = 0;
+				}
+   }
+   }
+   desplegarRunning();
+}
+//ALGORITMO MEMORIA NUR
+
+void __fastcall TForm1::EjecutarClick(TObject *Sender) {
+	t_actual++;
+
+	int process = running[0] - 1;
+	int pagina = Pagina->Text.ToInt();
+
+	switch(memoria) {
+	case 1: //FIFO
+		memoria_fifo(process, pagina);
+		break;
+	case 2: //LRU
+		memoria_lru(process, pagina);
+		break;
+	case 3: //LFU
+		memoria_lfu(process, pagina);
+		break;
+	case 4: //NUR
+		memoria_nur(process, pagina);
+		break;
+	}
+
+
+
+	//AUMENTA EL CPU ASIGNADO PARA EL PROCESO EN RUNNING
+	fueraBlocked();
+	cpu_asignado[running[0]-1]++;
+	calculo_CPURestante();
+	sumaEnvejecimiento();
+	muestraDespliegue();
+	tiempo_Actual->Caption = t_actual;
+	dispatcher();
+	imprimirEstados();
+}
+// ---------------------------------------------------------------------------
+
