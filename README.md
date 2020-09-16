@@ -1,5 +1,5 @@
 # MiniSO
-Operating System final proyect. If you do not do it by yourself, you will NOT pass the class.
+Operating System final proyect. "If you do not do it by yourself, you will NOT pass the class".
 
 ## Description
 Final proyect for the class Operating System, from the Universidad de Monterrey (UDEM).
