@@ -2,7 +2,7 @@
 Operating System final proyect. "If you do not do it by yourself, you will NOT pass the class".
 
 ## Description
-Final proyect for the class Operating System, from the Universidad de Monterrey (UDEM).
+Final proyect for the class Operating System, from Universidad de Monterrey (UDEM).
 This proyect covers most of the material about how a OS works, aplied in a beautiful program that does not crash. Don't try it please.
 The whole thing was programmed in C++.
 
